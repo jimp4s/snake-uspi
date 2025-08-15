@@ -1,136 +1,105 @@
 #!/bin/bash
 
-#
-# Script de build automatizado para Snake Game + USPI
-# 
+# Script de build para Snake Game + USPI
+# Atualizado com todas as correções
 
 set -e
 
-# Cores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Função para imprimir mensagens coloridas
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Verificar se estamos no diretório correto
-if [ ! -f "Makefile" ]; then
-    print_error "Makefile não encontrado. Execute este script no diretório raiz do projeto."
-    exit 1
-fi
-
-print_status "Iniciando build do Snake Game + USPI..."
+echo "[INFO] Iniciando build do Snake Game + USPI..."
 
 # Verificar toolchain
-print_status "Verificando toolchain ARM..."
+echo "[INFO] Verificando toolchain ARM..."
 if ! command -v arm-none-eabi-gcc &> /dev/null; then
-    print_error "arm-none-eabi-gcc não encontrado!"
-    print_error "Instale com: sudo apt-get install gcc-arm-none-eabi"
+    echo "[ERRO] Toolchain ARM não encontrada!"
+    echo "Instale: sudo apt-get install gcc-arm-none-eabi"
     exit 1
 fi
 
-print_status "Toolchain encontrada: $(arm-none-eabi-gcc --version | head -n1)"
+TOOLCHAIN_VERSION=$(arm-none-eabi-gcc --version | head -n1)
+echo "[INFO] Toolchain encontrada: $TOOLCHAIN_VERSION"
 
-# Verificar se USPI está presente
-if [ ! -d "uspi" ]; then
-    print_warning "Diretório USPI não encontrado."
-    print_status "Clonando USPI..."
-    git clone https://github.com/rsta2/uspi.git
-fi
+# Criar estrutura de diretórios
+echo "[INFO] Criando estrutura de diretórios..."
+mkdir -p src
+mkdir -p include
+mkdir -p build
 
-# Criar estrutura de diretórios se necessário
-print_status "Criando estrutura de diretórios..."
-mkdir -p src build
-
-# Verificar se arquivos fonte existem
+# Verificar se os arquivos necessários existem
 if [ ! -f "src/main.c" ]; then
-    print_error "src/main.c não encontrado!"
+    echo "[ERRO] src/main.c não encontrado!"
+    echo "Certifique-se de que o arquivo main.c corrigido está em src/"
     exit 1
 fi
 
 if [ ! -f "src/startup.s" ]; then
-    print_error "src/startup.s não encontrado!"
+    echo "[ERRO] src/startup.s não encontrado!"
+    echo "Certifique-se de que o arquivo startup.s está em src/"
     exit 1
 fi
 
-# Build USPI library
-print_status "Construindo biblioteca USPI..."
-if [ -f "uspi/lib/libuspi.a" ]; then
-    print_warning "libuspi.a já existe, reconstruindo..."
-    make -C uspi/lib clean
+# Verificar se existe um linker script
+if [ ! -f "kernel.ld" ] && [ ! -f "src/kernel.ld" ] && [ ! -f "link.ld" ]; then
+    echo "[AVISO] Nenhum linker script encontrado (kernel.ld, src/kernel.ld, ou link.ld)"
+    echo "Você pode precisar criar um ou ajustar o Makefile"
 fi
 
+if [ ! -f "include/config.h" ]; then
+    echo "[ERRO] include/config.h não encontrado!"
+    echo "Certifique-se de que o arquivo config.h está em include/"
+    exit 1
+fi
+
+if [ ! -f "include/graphics.h" ]; then
+    echo "[ERRO] include/graphics.h não encontrado!"
+    echo "Certifique-se de que o arquivo graphics.h está em include/"
+    exit 1
+fi
+
+if [ ! -f "src/graphics.c" ]; then
+    echo "[ERRO] src/graphics.c não encontrado!"
+    echo "Certifique-se de que o arquivo graphics.c está em src/"
+    exit 1
+fi
+
+# Construir biblioteca USPI
+if [ ! -d "uspi" ]; then
+    echo "[ERRO] Diretório USPI não encontrado!"
+    echo "Clone o repositório USPI ou verifique o caminho"
+    exit 1
+fi
+
+echo "[INFO] Construindo biblioteca USPI..."
 make -C uspi/lib
-
-if [ ! -f "uspi/lib/libuspi.a" ]; then
-    print_error "Falha ao construir libuspi.a"
+if [ $? -eq 0 ]; then
+    echo "[INFO] USPI construída com sucesso!"
+else
+    echo "[ERRO] Falha na construção da USPI!"
     exit 1
 fi
 
-print_status "USPI construída com sucesso!"
+# Construir projeto principal
+echo "[INFO] Construindo projeto principal..."
 
-# Build projeto principal
-print_status "Construindo projeto principal..."
+# Limpar build anterior
 make clean
-make
 
-if [ ! -f "kernel.img" ]; then
-    print_error "Falha ao gerar kernel.img"
+# Compilar
+make all
+
+if [ $? -eq 0 ]; then
+    echo "[SUCESSO] Build concluído com sucesso!"
+    echo ""
+    echo "Arquivos gerados:"
+    echo "  - kernel.elf (executável)"
+    echo "  - kernel.img (imagem para Raspberry Pi)"
+    echo ""
+    echo "Para testar no Raspberry Pi 3:"
+    echo "1. Copie kernel.img para o cartão SD"
+    echo "2. Certifique-se de ter config.txt adequado"
+    echo "3. Conecte um teclado USB"
+    echo "4. Inicialize o Pi"
+    ls -la kernel.*
+else
+    echo "[ERRO] Falha na construção do projeto!"
     exit 1
 fi
-
-print_status "Build concluída com sucesso!"
-print_status "Arquivo kernel.img gerado."
-
-# Verificar tamanho do kernel
-KERNEL_SIZE=$(stat -c%s "kernel.img")
-print_status "Tamanho do kernel: $KERNEL_SIZE bytes"
-
-if [ $KERNEL_SIZE -gt 8388608 ]; then  # 8MB
-    print_warning "Kernel muito grande! Considere otimizar o código."
-fi
-
-# Criar diretório de deploy se não existir
-mkdir -p deploy
-
-# Copiar arquivos necessários
-print_status "Preparando arquivos para deploy..."
-cp kernel.img deploy/
-cp config.txt deploy/
-
-print_status "Arquivos copiados para diretório deploy/:"
-ls -la deploy/
-
-print_status "===========================================" 
-print_status "BUILD CONCLUÍDA COM SUCESSO!"
-print_status "==========================================="
-print_status ""
-print_status "Próximos passos:"
-print_status "1. Baixar arquivos de firmware do Pi:"
-print_status "   - bootcode.bin"
-print_status "   - fixup.dat"  
-print_status "   - start.elf"
-print_status ""
-print_status "2. Copiar todos os arquivos para cartão SD:"
-print_status "   - kernel.img (gerado)"
-print_status "   - config.txt (gerado)"
-print_status "   - Arquivos de firmware (baixados)"
-print_status ""
-print_status "3. Inserir SD no Raspberry Pi e ligar"
-print_status ""
-print_status "Comando para baixar firmware:"
-echo "wget https://github.com/raspberrypi/firmware/raw/master/boot/bootcode.bin -O deploy/bootcode.bin"
-echo "wget https://github.com/raspberrypi/firmware/raw/master/boot/fixup.dat -O deploy/fixup.dat"  
-echo "wget https://github.com/raspberrypi/firmware/raw/master/boot/start.elf -O deploy/start.elf"

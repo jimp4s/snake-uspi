@@ -5,8 +5,11 @@ OBJCOPY = arm-none-eabi-objcopy
 
 # Flags de compilação
 CFLAGS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding
-CFLAGS += -I./uspi/include -Isrc -Iinclude
+CFLAGS += -I./uspi/include -Iinclude
 CFLAGS += -mcpu=cortex-a53 -DRASPPI=3
+
+# Flags de linking
+LDFLAGS = -L./uspi/lib -luspi
 
 # Diretórios
 SRCDIR = src
@@ -36,7 +39,7 @@ $(IMAGE): $(TARGET)
 
 # Linkar o executável
 $(TARGET): $(OBJECTS) $(USPI_LIB)
-	$(CC) $(CFLAGS) -T $(SRCDIR)/kernel.ld -o $@ $(OBJECTS) -L$(USPIDIR)/lib -luspi
+	$(CC) $(CFLAGS) -T kernel.ld -o $@ $(OBJECTS) $(LDFLAGS)
 
 # Compilar objetos C
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
