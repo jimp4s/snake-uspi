@@ -1,0 +1,19 @@
+# Configuração para Raspberry Pi - Snake Game
+# Este arquivo deve ser colocado na partição boot do cartão SD
+
+# Configurações de vídeo
+hdmi_group=2
+hdmi_mode=9    # 800x600 @ 60Hz
+hdmi_drive=2
+
+# Configurações de inicialização
+kernel=kernel.img
+disable_commandline_tags=1
+disable_overscan=1
+
+# Configurações de GPU
+gpu_mem=64
+
+# Outras configurações
+enable_uart=1
+core_freq=250
