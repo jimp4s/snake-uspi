@@ -11,6 +11,8 @@
 Game game;
 uint32_t tick_count = 0;
 uint32_t last_input_time = 0;
+extern void init_system(void);
+extern void ProcessKernelTimers(void);
 
 // Declarações de funções
 void handle_input(unsigned char key);
@@ -278,6 +280,7 @@ void init_random(void) {
 }
 
 int main(void) {
+    init_system(); 
     // Inicializar USPI
     printf("Inicializando USPI...\n");
     if (!USPiInitialize()) {
@@ -368,6 +371,7 @@ int main(void) {
         
         // Verificar se deve sair (implementar lógica de saída se necessário)
         // Por enquanto, loop infinito - o jogo roda continuamente
+        ProcessKernelTimers();
     }
     
     // Cleanup (nunca alcançado neste exemplo)

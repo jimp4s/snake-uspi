@@ -18,7 +18,7 @@ USPIDIR = uspi
 INCLUDEDIR = include
 
 # Arquivos fonte
-SOURCES = $(SRCDIR)/main.c $(SRCDIR)/graphics.c
+SOURCES = $(SRCDIR)/main.c $(SRCDIR)/graphics.c $(SRCDIR)/syscalls.c
 ASM_SOURCES = $(SRCDIR)/startup.s
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(BUILDDIR)/%.o) $(ASM_SOURCES:$(SRCDIR)/%.s=$(BUILDDIR)/%.o)
 
