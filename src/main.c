@@ -1,160 +1,76 @@
-//
-// Snake Game para Raspberry Pi usando USPI
-// Integração do Polisnake com USPI para controle por teclado USB
-//
-
-#include "uspi.h"
-#include "uspios.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <string.h>
-
-// Definições do jogo
-#define SCREEN_WIDTH    800
-#define SCREEN_HEIGHT   600
-#define GAME_WIDTH      40
-#define GAME_HEIGHT     30
-#define CELL_SIZE       (SCREEN_WIDTH / GAME_WIDTH)
-#define MAX_SNAKE_LENGTH (GAME_WIDTH * GAME_HEIGHT)
-
-// Cores (RGB565)
-#define COLOR_BLACK     0x0000
-#define COLOR_GREEN     0x07E0
-#define COLOR_RED       0xF800
-#define COLOR_WHITE     0xFFFF
-#define COLOR_BLUE      0x001F
-
-// Direções
-typedef enum {
-    DIR_UP,
-    DIR_DOWN,
-    DIR_LEFT,
-    DIR_RIGHT
-} Direction;
-
-// Estrutura do jogo
-typedef struct {
-    int x, y;
-} Point;
-
-typedef struct {
-    Point body[MAX_SNAKE_LENGTH];
-    int length;
-    Direction direction;
-    Direction next_direction;
-} Snake;
-
-typedef struct {
-    Point food;
-    Snake snake;
-    int score;
-    bool game_over;
-    bool game_running;
-} GameState;
+#include "config.h"
+#include "graphics.h"
+#include <uspi.h>
 
 // Variáveis globais
-static GameState game;
-static volatile uint32_t tick_count = 0;
-static volatile char last_key = 0;
-static bool game_paused = false;
-static uint32_t last_input_time = 0;
+Game game;
+uint32_t tick_count = 0;
+uint32_t last_input_time = 0;
 
-// Forward declarations
+// Declarações de funções
+void handle_input(unsigned char key);
+void spawn_food(void);
+bool check_collision(Position pos);
 void init_game(void);
 void update_game(void);
 void draw_game(void);
-void handle_input(void);
-void spawn_food(void);
-bool check_collision(Point p);
-void draw_score(void);
-void draw_game_over_screen(void);
+void delay_ms(unsigned int ms);
+void debug_print_game_state(void);
+void init_random(void);
+void init_graphics_system(void);
+uint32_t get_ticks(void);
+void timer_handler(void);
+void keyboard_handler(unsigned char ucModifiers, const unsigned char *pKeys);
 
-// Timer callback para USPi
+// Função para obter timestamp (implementação básica)
+uint32_t get_ticks(void) {
+    return tick_count++;
+}
+
+// Timer callback para incrementar ticks
 void timer_handler(void) {
     tick_count++;
 }
 
-// Keyboard callback para USPi
-void keyboard_handler(const char *key) {
-    if (key && *key && (tick_count - last_input_time) > INPUT_DEBOUNCE_MS) {
-        last_key = *key;
-        last_input_time = tick_count;
-    }
-}
-
-// Inicialização dos gráficos (framebuffer)
-void init_graphics(void) {
-    // Configurar framebuffer - isso seria específico para cada implementação
-    // Aqui assumimos que temos acesso direto à memória de vídeo
-    framebuffer = (uint16_t*)0x3C000000; // Endereço típico do framebuffer no RPi
+// Handler corrigido para teclado (assinatura correta para USPI)
+void keyboard_handler(unsigned char ucModifiers, const unsigned char *pKeys) {
+    uint32_t current_time = get_ticks();
     
-    // Limpar tela
-    for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-        framebuffer[i] = COLOR_BLACK;
-    }
-}
-
-// Desenhar pixel
-void draw_pixel(int x, int y, uint16_t color) {
-    if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) {
-        framebuffer[y * SCREEN_WIDTH + x] = color;
-    }
-}
-
-// Desenhar retângulo
-void draw_rect(int x, int y, int w, int h, uint16_t color) {
-    for (int dy = 0; dy < h; dy++) {
-        for (int dx = 0; dx < w; dx++) {
-            draw_pixel(x + dx, y + dy, color);
+    // Debounce de entrada
+    if ((current_time - last_input_time) > INPUT_DEBOUNCE_MS) {
+        // Verifica se alguma tecla foi pressionada
+        for (int i = 0; i < 6 && pKeys[i] != 0; i++) {
+            unsigned char key = pKeys[i];
+            
+            if (key) {
+                handle_input(key);
+                last_input_time = current_time;
+                break; // Processa apenas a primeira tecla
+            }
         }
     }
 }
 
-// Inicializar estado do jogo
-void init_game(void) {
-    // Inicializar cobra
-    game.snake.length = INITIAL_SNAKE_LENGTH;
-    game.snake.direction = DIR_RIGHT;
-    game.snake.next_direction = DIR_RIGHT;
-    
-    game.snake.body[0].x = GAME_WIDTH / 2;
-    game.snake.body[0].y = GAME_HEIGHT / 2;
-    
-    for (int i = 1; i < game.snake.length; i++) {
-        game.snake.body[i].x = game.snake.body[0].x - i;
-        game.snake.body[i].y = game.snake.body[0].y;
-    }
-    
-    // Inicializar estado do jogo
-    game.score = 0;
-    game.game_over = false;
-    game.game_running = true;
-    game_paused = false;
-    
-    // Spawnar primeira comida
-    spawn_food();
-}
-
-// Spawnar comida em posição aleatória
-void spawn_food(void) {
-    int attempts = 0;
-    do {
-        game.food.x = (tick_count * 7) % GAME_WIDTH;
-        game.food.y = (tick_count * 13) % GAME_HEIGHT;
-        attempts++;
-    } while (check_collision(game.food) && attempts < FOOD_SPAWN_RETRIES);
+// Inicialização gráfica
+void init_graphics_system(void) {
+    init_graphics();
 }
 
 // Verificar colisão
-bool check_collision(Point p) {
-    // Verificar colisão com paredes
-    if (p.x < 0 || p.x >= GAME_WIDTH || p.y < 0 || p.y >= GAME_HEIGHT) {
+bool check_collision(Position pos) {
+    // Verificar colisão com bordas
+    if (pos.x < 0 || pos.x >= GAME_WIDTH || pos.y < 0 || pos.y >= GAME_HEIGHT) {
         return true;
     }
     
-    // Verificar colisão com corpo da cobra
-    for (int i = 0; i < game.snake.length; i++) {
-        if (game.snake.body[i].x == p.x && game.snake.body[i].y == p.y) {
+    // Verificar colisão com o corpo da cobra
+    for (int i = 1; i < game.snake.length; i++) {
+        if (game.snake.body[i].x == pos.x && game.snake.body[i].y == pos.y) {
             return true;
         }
     }
@@ -162,68 +78,115 @@ bool check_collision(Point p) {
     return false;
 }
 
-// Processar entrada do teclado
-void handle_input(void) {
-    if (!last_key) return;
+// Inicializar jogo
+void init_game(void) {
+    game.snake.length = INITIAL_SNAKE_LENGTH;
+    game.snake.direction = DIR_RIGHT;
+    game.snake.next_direction = DIR_RIGHT;
+    game.score = 0;
+    game.state = GAME_RUNNING;
+    game.last_update = 0;
     
-    Direction new_dir = game.snake.direction;
+    // Posicionar cobra no centro
+    int start_x = GAME_WIDTH / 2;
+    int start_y = GAME_HEIGHT / 2;
     
-    switch (last_key) {
+    for (int i = 0; i < game.snake.length; i++) {
+        game.snake.body[i].x = start_x - i;
+        game.snake.body[i].y = start_y;
+    }
+    
+    spawn_food();
+}
+
+// Gerar nova comida
+void spawn_food(void) {
+    int attempts = 0;
+    do {
+        game.food.x = rand() % GAME_WIDTH;
+        game.food.y = rand() % GAME_HEIGHT;
+        attempts++;
+    } while (check_collision(game.food) && attempts < FOOD_SPAWN_RETRIES);
+}
+
+// Tratamento de entrada
+void handle_input(unsigned char key) {
+    if (game.state == GAME_OVER) {
+        switch (key) {
+            case KEY_RESTART_1:
+            case KEY_RESTART_2:
+                init_game();
+                return;
+            case KEY_QUIT_1:
+            case KEY_QUIT_2:
+                game.state = GAME_OVER; // Manter no game over ou implementar saída
+                return;
+        }
+        return;
+    }
+    
+    switch (key) {
         case KEY_UP_1:
         case KEY_UP_2:
-            if (game.snake.direction != DIR_DOWN) new_dir = DIR_UP;
+            if (game.snake.direction != DIR_DOWN) {
+                game.snake.next_direction = DIR_UP;
+            }
             break;
         case KEY_DOWN_1:
         case KEY_DOWN_2:
-            if (game.snake.direction != DIR_UP) new_dir = DIR_DOWN;
+            if (game.snake.direction != DIR_UP) {
+                game.snake.next_direction = DIR_DOWN;
+            }
             break;
         case KEY_LEFT_1:
         case KEY_LEFT_2:
-            if (game.snake.direction != DIR_RIGHT) new_dir = DIR_LEFT;
+            if (game.snake.direction != DIR_RIGHT) {
+                game.snake.next_direction = DIR_LEFT;
+            }
             break;
         case KEY_RIGHT_1:
         case KEY_RIGHT_2:
-            if (game.snake.direction != DIR_LEFT) new_dir = DIR_RIGHT;
+            if (game.snake.direction != DIR_LEFT) {
+                game.snake.next_direction = DIR_RIGHT;
+            }
             break;
         case KEY_RESTART_1:
         case KEY_RESTART_2:
-            if (game.game_over) {
-                init_game();
-                last_key = 0;
-                return;
-            }
+            init_game();
             break;
         case KEY_QUIT_1:
         case KEY_QUIT_2:
-            game.game_running = false;
-            last_key = 0;
-            return;
+            game.state = GAME_OVER;
+            break;
         case KEY_PAUSE_1:
         case KEY_PAUSE_2:
-            if (!game.game_over) {
-                game_paused = !game_paused;
+            if (game.state == GAME_RUNNING) {
+                game.state = GAME_PAUSED;
+            } else if (game.state == GAME_PAUSED) {
+                game.state = GAME_RUNNING;
             }
             break;
     }
-    
-    if (!game.game_over && !game_paused) {
-        game.snake.next_direction = new_dir;
-    }
-    
-    last_key = 0; // Limpar tecla processada
 }
 
-// Atualizar lógica do jogo
+// Atualizar jogo
 void update_game(void) {
-    if (game.game_over || game_paused) {
+    if (game.state != GAME_RUNNING) {
         return;
     }
+    
+    uint32_t current_time = get_ticks();
+    if (current_time - game.last_update < GAME_SPEED_MS) {
+        return;
+    }
+    
+    game.last_update = current_time;
     
     // Atualizar direção
     game.snake.direction = game.snake.next_direction;
     
     // Calcular nova posição da cabeça
-    Point new_head = game.snake.body[0];
+    Position new_head = game.snake.body[0];
     
     switch (game.snake.direction) {
         case DIR_UP:    new_head.y--; break;
@@ -234,41 +197,29 @@ void update_game(void) {
     
     // Verificar colisão
     if (check_collision(new_head)) {
-        game.game_over = true;
+        game.state = GAME_OVER;
         return;
-    }
-    
-    // Verificar se comeu a comida
-    bool ate_food = (new_head.x == game.food.x && new_head.y == game.food.y);
-    
-    if (ate_food) {
-        game.score += POINTS_PER_FOOD;
-        spawn_food();
-        
-        // Aumentar tamanho da cobra
-        if (game.snake.length < MAX_SNAKE_LENGTH) {
-            game.snake.length++;
-        }
     }
     
     // Mover corpo da cobra
     for (int i = game.snake.length - 1; i > 0; i--) {
         game.snake.body[i] = game.snake.body[i - 1];
     }
-    
-    // Mover cabeça
     game.snake.body[0] = new_head;
+    
+    // Verificar se comeu comida
+    if (new_head.x == game.food.x && new_head.y == game.food.y) {
+        if (game.snake.length < MAX_SNAKE_LENGTH) {
+            game.snake.length++;
+        }
+        game.score += POINTS_PER_FOOD;
+        spawn_food();
+    }
 }
 
-// Desenhar o jogo
+// Desenhar jogo
 void draw_game(void) {
-    // Limpar tela
     graphics_clear_screen(BACKGROUND_COLOR);
-    
-    // Desenhar grade se habilitada
-    #if ENABLE_GRID
-    graphics_draw_grid(GRID_COLOR);
-    #endif
     
     // Desenhar cobra
     for (int i = 0; i < game.snake.length; i++) {
@@ -279,195 +230,147 @@ void draw_game(void) {
     // Desenhar comida
     graphics_draw_game_cell_bordered(game.food.x, game.food.y, FOOD_COLOR, COLOR_WHITE);
     
-    // Desenhar score
-    draw_score();
+    // Desenhar pontuação
+    char score_text[32];
+    sprintf(score_text, "Score: %d", game.score);
+    graphics_draw_string(10, 10, score_text, TEXT_COLOR);
     
-    // Desenhar tela de game over se necessário
-    if (game.game_over) {
-        draw_game_over_screen();
+    // Desenhar mensagens de estado
+    if (game.state == GAME_PAUSED) {
+        graphics_draw_rect(SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 - 20,
+                          100, 40, PAUSE_BG_COLOR);
+        graphics_draw_string(SCREEN_WIDTH/2 - 32, SCREEN_HEIGHT/2 - 8,
+                           "PAUSED", TEXT_COLOR);
+    } else if (game.state == GAME_OVER) {
+        graphics_draw_rect(SCREEN_WIDTH/2 - 60, SCREEN_HEIGHT/2 - 30,
+                          120, 60, PAUSE_BG_COLOR);
+        graphics_draw_string(SCREEN_WIDTH/2 - 40, SCREEN_HEIGHT/2 - 16,
+                           "GAME OVER", TEXT_COLOR);
+        graphics_draw_string(SCREEN_WIDTH/2 - 48, SCREEN_HEIGHT/2,
+                           "Press R to restart", TEXT_COLOR);
     }
     
-    // Desenhar indicador de pause
-    if (game_paused && !game.game_over) {
-        graphics_draw_rect(SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 - 20, 
-                          100, 40, COLOR_WHITE);
-        graphics_draw_rect(SCREEN_WIDTH/2 - 48, SCREEN_HEIGHT/2 - 18, 
-                          96, 36, COLOR_BLACK);
-        graphics_draw_string(SCREEN_WIDTH/2 - 32, SCREEN_HEIGHT/2 - 8, 
-                           "PAUSED", COLOR_WHITE);
-    }
-    
-    // Apresentar buffer se double buffering estiver habilitado
     graphics_swap_buffers();
 }
 
-// Desenhar score
-void draw_score(void) {
-    // Área do score no topo da tela
-    graphics_draw_rect(0, 0, SCREEN_WIDTH, 30, COLOR_BLACK);
-    graphics_draw_string(10, 10, "Score: ", COLOR_WHITE);
-    
-    // Converter score para string (implementação simples)
-    char score_str[16];
-    int score = game.score;
-    int pos = 0;
-    
-    if (score == 0) {
-        score_str[pos++] = '0';
-    } else {
-        // Converter número para string (ordem reversa)
-        char temp[16];
-        int temp_pos = 0;
-        while (score > 0) {
-            temp[temp_pos++] = '0' + (score % 10);
-            score /= 10;
-        }
-        // Reverter ordem
-        for (int i = temp_pos - 1; i >= 0; i--) {
-            score_str[pos++] = temp[i];
+// Função de delay - implementação robusta
+void delay_ms(unsigned int ms) {
+    // Implementação de delay básico para bare metal
+    // Ajuste o multiplicador conforme a frequência do seu sistema
+    for (unsigned int i = 0; i < ms; i++) {
+        for (volatile unsigned int j = 0; j < 1000; j++) {
+            __asm__ __volatile__("nop");
         }
     }
-    score_str[pos] = '\0';
-    
-    graphics_draw_string(70, 10, score_str, COLOR_WHITE);
 }
 
-// Desenhar tela de game over
-void draw_game_over_screen(void) {
-    // Fundo semi-transparente (simulado)
-    graphics_draw_rect(SCREEN_WIDTH/4, SCREEN_HEIGHT/2 - 80, 
-                      SCREEN_WIDTH/2, 160, COLOR_WHITE);
-    graphics_draw_rect(SCREEN_WIDTH/4 + 2, SCREEN_HEIGHT/2 - 78, 
-                      SCREEN_WIDTH/2 - 4, 156, COLOR_BLACK);
-    
-    // Texto "GAME OVER"
-    graphics_draw_string(SCREEN_WIDTH/2 - 40, SCREEN_HEIGHT/2 - 60, 
-                        "GAME OVER", COLOR_RED);
-    
-    // Score final
-    graphics_draw_string(SCREEN_WIDTH/2 - 35, SCREEN_HEIGHT/2 - 30, 
-                        "Final Score:", COLOR_WHITE);
-    
-    // Instruções
-    graphics_draw_string(SCREEN_WIDTH/2 - 45, SCREEN_HEIGHT/2 + 20, 
-                        "Press R to restart", COLOR_WHITE);
-    graphics_draw_string(SCREEN_WIDTH/2 - 35, SCREEN_HEIGHT/2 + 40, 
-                        "Press Q to quit", COLOR_WHITE);
+// Função auxiliar para debug (opcional)
+void debug_print_game_state(void) {
+    printf("Snake pos: (%d,%d), Length: %d, Score: %d, State: %d\n",
+           game.snake.body[0].x, game.snake.body[0].y,
+           game.snake.length, game.score, game.state);
 }
 
-// Função principal
+// Função para inicializar sistema de random
+void init_random(void) {
+    // Usar tick count como seed básico
+    srand(get_ticks());
+}
+
 int main(void) {
     // Inicializar USPI
+    printf("Inicializando USPI...\n");
     if (!USPiInitialize()) {
-        return 1; // Falha na inicialização
+        printf("ERRO: Falha ao inicializar USPI!\n");
+        return 1;
     }
+    printf("USPI inicializado com sucesso!\n");
     
-    // Aguardar inicialização do teclado
-    while (!USPiKeyboardAvailable()) {
-        USPiMsDelay(100);
-    }
+    // Inicializar sistema gráfico
+    printf("Inicializando sistema gráfico...\n");
+    init_graphics_system();
+    printf("Sistema gráfico inicializado!\n");
     
-    // Configurar callback do teclado
-    USPiKeyboardRegisterKeyStatusHandlerRaw(keyboard_handler);
+    // Inicializar sistema de números aleatórios
+    init_random();
     
-    // Inicializar gráficos e jogo
-    init_graphics();
+    // Inicializar jogo
+    printf("Inicializando jogo...\n");
     init_game();
+    printf("Jogo inicializado!\n");
     
-    uint32_t last_update = 0;
-    const uint32_t update_interval = 20; // ~50 FPS
+    // Aguardar dispositivos USB
+    printf("Aguardando dispositivos USB...\n");
+    bool keyboard_found = false;
+    for (int i = 0; i < 50; i++) { // Aguardar até 5 segundos
+        delay_ms(100);
+        if (USPiKeyboardAvailable()) {
+            keyboard_found = true;
+            break;
+        }
+        if (i % 10 == 0) {
+            printf("Aguardando teclado... (%d/5s)\n", i/10 + 1);
+        }
+    }
+    
+    if (!keyboard_found) {
+        printf("AVISO: Teclado USB não encontrado!\n");
+        printf("O jogo continuará, mas você precisará conectar um teclado.\n");
+    } else {
+        printf("Teclado USB detectado!\n");
+    }
+    
+    // Registrar handler de teclado com assinatura correta
+    if (keyboard_found) {
+        USPiKeyboardRegisterKeyStatusHandlerRaw(keyboard_handler);
+        printf("Handler de teclado registrado!\n");
+    }
+    
+    printf("\n=== SNAKE GAME ===\n");
+    printf("Controles:\n");
+    printf("  Movimento: WASD ou Setas\n");
+    printf("  Pausar: SPACE ou P\n");
+    printf("  Reiniciar: R ou F\n");
+    printf("  Sair: ESC ou Q\n");
+    printf("================\n\n");
+    
+    // Desenhar tela inicial
+    draw_game();
+    
+    uint32_t frame_count = 0;
+    uint32_t last_debug_print = 0;
     
     // Loop principal do jogo
-    while (game.game_running) {
-        // Atualizar USPi
-        boolean keyboard_updated = USPiKeyboardUpdate();
+    while (true) {
+        uint32_t current_time = get_ticks();
         
-        // Processar entrada
-        if (keyboard_updated || last_key != 0) {
-            handle_input();
+        // Processar entrada USB
+        if (USPiKeyboardAvailable()) {
+            // Não precisamos chamar USPiKeyboardUpdate() pois o handler raw é chamado automaticamente
+            // Apenas manter o sistema USB ativo
         }
         
-        // Atualizar jogo em intervalos regulares
-        if (tick_count - last_update >= update_interval) {
-            update_game();
-            draw_game();
-            last_update = tick_count;
+        // Atualizar lógica do jogo
+        update_game();
+        
+        // Renderizar
+        draw_game();
+        
+        // Debug info a cada 5 segundos (opcional)
+        if (current_time - last_debug_print > 5000) {
+            debug_print_game_state();
+            last_debug_print = current_time;
         }
         
-        // Pequeno delay para não sobrecarregar CPU
-        USPiMsDelay(10);
+        // Controle de FPS (~60 FPS)
+        delay_ms(16);
+        frame_count++;
+        
+        // Verificar se deve sair (implementar lógica de saída se necessário)
+        // Por enquanto, loop infinito - o jogo roda continuamente
     }
     
+    // Cleanup (nunca alcançado neste exemplo)
+    printf("Encerrando Snake Game...\n");
     return 0;
-}
-
-// Implementações necessárias para USPi (uspios.h)
-
-void *malloc(size_t size) {
-    // Implementação simples de malloc
-    static char heap[0x100000]; // 1MB heap
-    static size_t heap_pos = 0;
-    
-    if (heap_pos + size > sizeof(heap)) {
-        return 0;
-    }
-    
-    void *ptr = &heap[heap_pos];
-    heap_pos += (size + 7) & ~7; // Align to 8 bytes
-    return ptr;
-}
-
-void free(void *ptr) {
-    // Implementação simples - não faz nada
-    (void)ptr;
-}
-
-void *calloc(size_t nmemb, size_t size) {
-    size_t total = nmemb * size;
-    void *ptr = malloc(total);
-    if (ptr) {
-        memset(ptr, 0, total);
-    }
-    return ptr;
-}
-
-void *realloc(void *ptr, size_t size) {
-    // Implementação simples
-    if (!ptr) {
-        return malloc(size);
-    }
-    
-    if (size == 0) {
-        free(ptr);
-        return 0;
-    }
-    
-    // Para simplicidade, sempre aloca novo bloco
-    void *new_ptr = malloc(size);
-    if (new_ptr && ptr) {
-        // Copiar dados existentes (assumindo tamanho menor)
-        memcpy(new_ptr, ptr, size);
-    }
-    return new_ptr;
-}
-
-// Timer functions para USPi
-void uspi_assertion_failed(const char *expr, const char *file, unsigned line) {
-    // Handle assertion failure
-    while (1) {} // Halt
-}
-
-void uspi_log_write(const char *source, unsigned severity, const char *message, ...) {
-    // Log function - can be empty for now
-}
-
-unsigned uspi_get_ticks(void) {
-    return tick_count;
-}
-
-void uspi_ms_delay(unsigned ms) {
-    unsigned start = tick_count;
-    while (tick_count - start < ms) {
-        // Wait
-    }
 }

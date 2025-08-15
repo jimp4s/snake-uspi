@@ -1,236 +1,214 @@
-//
-// graphics.c - Módulo de gráficos para Snake Game
-// Abstração para operações de desenho e framebuffer
-//
-
 #include "graphics.h"
-#include "game_config.h"
-#include <stdint.h>
 #include <string.h>
 
-// Ponteiro para framebuffer
-static volatile uint16_t *framebuffer = NULL;
+// Framebuffer global
+uint16_t *framebuffer = NULL;
 
-// Buffer duplo para reduzir flickering (opcional)
-static uint16_t back_buffer[SCREEN_WIDTH * SCREEN_HEIGHT];
-static bool double_buffer_enabled = false;
+// Font simples 8x8 (bitmap básico para ASCII)
+static const uint8_t font_8x8[96][8] = {
+    // Espaço (32)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    // ! (33)
+    {0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00},
+    // " (34)
+    {0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+    // # (35)
+    {0x36, 0x36, 0x7F, 0x36, 0x7F, 0x36, 0x36, 0x00},
+    // $ (36)
+    {0x0C, 0x3E, 0x03, 0x1E, 0x30, 0x1F, 0x0C, 0x00},
+    // % (37)
+    {0x00, 0x63, 0x33, 0x18, 0x0C, 0x66, 0x63, 0x00},
+    // & (38)
+    {0x1C, 0x36, 0x1C, 0x6E, 0x3B, 0x33, 0x6E, 0x00},
+    // ' (39)
+    {0x06, 0x06, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00},
+    // ( (40)
+    {0x18, 0x0C, 0x06, 0x06, 0x06, 0x0C, 0x18, 0x00},
+    // ) (41)
+    {0x06, 0x0C, 0x18, 0x18, 0x18, 0x0C, 0x06, 0x00},
+    // * (42)
+    {0x00, 0x66, 0x3C, 0xFF, 0x3C, 0x66, 0x00, 0x00},
+    // + (43)
+    {0x00, 0x0C, 0x0C, 0x3F, 0x0C, 0x0C, 0x00, 0x00},
+    // , (44)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x06, 0x00},
+    // - (45)
+    {0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x00, 0x00},
+    // . (46)
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x00},
+    // / (47)
+    {0x60, 0x30, 0x18, 0x0C, 0x06, 0x03, 0x01, 0x00},
+    // 0 (48)
+    {0x3E, 0x63, 0x73, 0x7B, 0x6F, 0x67, 0x3E, 0x00},
+    // 1 (49)
+    {0x0C, 0x0E, 0x0C, 0x0C, 0x0C, 0x0C, 0x3F, 0x00},
+    // 2 (50)
+    {0x1E, 0x33, 0x30, 0x1C, 0x06, 0x33, 0x3F, 0x00},
+    // 3 (51)
+    {0x1E, 0x33, 0x30, 0x1C, 0x30, 0x33, 0x1E, 0x00},
+    // 4 (52)
+    {0x38, 0x3C, 0x36, 0x33, 0x7F, 0x30, 0x78, 0x00},
+    // 5 (53)
+    {0x3F, 0x03, 0x1F, 0x30, 0x30, 0x33, 0x1E, 0x00},
+    // 6 (54)
+    {0x1C, 0x06, 0x03, 0x1F, 0x33, 0x33, 0x1E, 0x00},
+    // 7 (55)
+    {0x3F, 0x33, 0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x00},
+    // 8 (56)
+    {0x1E, 0x33, 0x33, 0x1E, 0x33, 0x33, 0x1E, 0x00},
+    // 9 (57)
+    {0x1E, 0x33, 0x33, 0x3E, 0x30, 0x18, 0x0E, 0x00},
+    // : (58)
+    {0x00, 0x0C, 0x0C, 0x00, 0x00, 0x0C, 0x0C, 0x00},
+    // ; (59)
+    {0x00, 0x0C, 0x0C, 0x00, 0x00, 0x0C, 0x06, 0x00},
+    // < (60)
+    {0x18, 0x0C, 0x06, 0x03, 0x06, 0x0C, 0x18, 0x00},
+    // = (61)
+    {0x00, 0x00, 0x3F, 0x00, 0x00, 0x3F, 0x00, 0x00},
+    // > (62)
+    {0x06, 0x0C, 0x18, 0x30, 0x18, 0x0C, 0x06, 0x00},
+    // ? (63)
+    {0x1E, 0x33, 0x30, 0x18, 0x0C, 0x00, 0x0C, 0x00},
+    // Continuar com mais caracteres se necessário...
+    // A (65)
+    {0x0C, 0x1E, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x00},
+    // B (66)
+    {0x3F, 0x66, 0x66, 0x3E, 0x66, 0x66, 0x3F, 0x00},
+    // C (67)
+    {0x3C, 0x66, 0x03, 0x03, 0x03, 0x66, 0x3C, 0x00},
+    // D (68)
+    {0x1F, 0x36, 0x66, 0x66, 0x66, 0x36, 0x1F, 0x00},
+    // E (69)
+    {0x7F, 0x46, 0x16, 0x1E, 0x16, 0x46, 0x7F, 0x00},
+    // F (70)
+    {0x7F, 0x46, 0x16, 0x1E, 0x16, 0x06, 0x0F, 0x00},
+    // G (71)
+    {0x3C, 0x66, 0x03, 0x03, 0x73, 0x66, 0x7C, 0x00},
+    // H (72)
+    {0x33, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x33, 0x00},
+    // I (73)
+    {0x1E, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},
+    // J (74)
+    {0x78, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1E, 0x00},
+    // K (75)
+    {0x67, 0x66, 0x36, 0x1E, 0x36, 0x66, 0x67, 0x00},
+    // L (76)
+    {0x0F, 0x06, 0x06, 0x06, 0x46, 0x66, 0x7F, 0x00},
+    // M (77)
+    {0x63, 0x77, 0x7F, 0x7F, 0x6B, 0x63, 0x63, 0x00},
+    // N (78)
+    {0x63, 0x67, 0x6F, 0x7B, 0x73, 0x63, 0x63, 0x00},
+    // O (79)
+    {0x1C, 0x36, 0x63, 0x63, 0x63, 0x36, 0x1C, 0x00},
+    // P (80)
+    {0x3F, 0x66, 0x66, 0x3E, 0x06, 0x06, 0x0F, 0x00},
+    // Q (81)
+    {0x1E, 0x33, 0x33, 0x33, 0x3B, 0x1E, 0x38, 0x00},
+    // R (82)
+    {0x3F, 0x66, 0x66, 0x3E, 0x36, 0x66, 0x67, 0x00},
+    // S (83)
+    {0x1E, 0x33, 0x07, 0x0E, 0x38, 0x33, 0x1E, 0x00},
+    // T (84)
+    {0x3F, 0x2D, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},
+    // U (85)
+    {0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x3F, 0x00},
+    // V (86)
+    {0x33, 0x33, 0x33, 0x33, 0x33, 0x1E, 0x0C, 0x00},
+    // W (87)
+    {0x63, 0x63, 0x63, 0x6B, 0x7F, 0x77, 0x63, 0x00},
+    // X (88)
+    {0x63, 0x63, 0x36, 0x1C, 0x1C, 0x36, 0x63, 0x00},
+    // Y (89)
+    {0x33, 0x33, 0x33, 0x1E, 0x0C, 0x0C, 0x1E, 0x00},
+    // Z (90)
+    {0x7F, 0x63, 0x31, 0x18, 0x4C, 0x66, 0x7F, 0x00},
+    // Restante dos caracteres pode ser preenchido conforme necessário
+};
 
-// Inicializar sistema gráfico
-bool graphics_init(void) {
-    // Configurar ponteiro do framebuffer
-    // Em implementação real, isso viria de inicialização do hardware
-    framebuffer = (volatile uint16_t*)FRAMEBUFFER_ADDR;
-    
-    if (!framebuffer) {
-        return false;
-    }
-    
-    // Limpar tela inicial
+void init_graphics(void) {
+    framebuffer = (uint16_t*)0x3C000000; // Endereço típico do framebuffer no RPi
     graphics_clear_screen(BACKGROUND_COLOR);
-    
-    return true;
 }
 
-// Habilitar/desabilitar double buffering
-void graphics_set_double_buffer(bool enabled) {
-    double_buffer_enabled = enabled;
-    if (enabled) {
-        // Inicializar back buffer
-        memset(back_buffer, 0, sizeof(back_buffer));
+void draw_pixel(int x, int y, uint16_t color) {
+    if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT && framebuffer) {
+        framebuffer[y * SCREEN_WIDTH + x] = color;
     }
 }
 
-// Obter ponteiro do buffer atual
-uint16_t* graphics_get_current_buffer(void) {
-    return double_buffer_enabled ? back_buffer : (uint16_t*)framebuffer;
-}
-
-// Trocar buffers (apresentar back buffer)
-void graphics_swap_buffers(void) {
-    if (double_buffer_enabled && framebuffer) {
-        // Copiar back buffer para framebuffer
-        memcpy((void*)framebuffer, back_buffer, sizeof(back_buffer));
-    }
-}
-
-// Desenhar pixel individual
-void graphics_draw_pixel(int x, int y, uint16_t color) {
-    if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) {
-        return; // Fora dos limites
-    }
-    
-    uint16_t *buffer = graphics_get_current_buffer();
-    buffer[y * SCREEN_WIDTH + x] = color;
-}
-
-// Desenhar retângulo preenchido
-void graphics_draw_rect(int x, int y, int width, int height, uint16_t color) {
-    // Clippping
-    if (x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return;
-    if (x + width < 0 || y + height < 0) return;
-    
-    int start_x = (x < 0) ? 0 : x;
-    int start_y = (y < 0) ? 0 : y;
-    int end_x = (x + width > SCREEN_WIDTH) ? SCREEN_WIDTH : x + width;
-    int end_y = (y + height > SCREEN_HEIGHT) ? SCREEN_HEIGHT : y + height;
-    
-    uint16_t *buffer = graphics_get_current_buffer();
-    
-    for (int dy = start_y; dy < end_y; dy++) {
-        for (int dx = start_x; dx < end_x; dx++) {
-            buffer[dy * SCREEN_WIDTH + dx] = color;
-        }
-    }
-}
-
-// Desenhar borda de retângulo
-void graphics_draw_rect_outline(int x, int y, int width, int height, uint16_t color) {
-    // Linhas horizontais
-    graphics_draw_rect(x, y, width, 1, color);                    // Top
-    graphics_draw_rect(x, y + height - 1, width, 1, color);       // Bottom
-    
-    // Linhas verticais  
-    graphics_draw_rect(x, y, 1, height, color);                   // Left
-    graphics_draw_rect(x + width - 1, y, 1, height, color);       // Right
-}
-
-// Limpar tela inteira
 void graphics_clear_screen(uint16_t color) {
-    uint16_t *buffer = graphics_get_current_buffer();
+    if (!framebuffer) return;
+    
     for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) {
-        buffer[i] = color;
+        framebuffer[i] = color;
     }
 }
 
-// Desenhar linha horizontal
-void graphics_draw_hline(int x, int y, int width, uint16_t color) {
-    graphics_draw_rect(x, y, width, 1, color);
-}
-
-// Desenhar linha vertical
-void graphics_draw_vline(int x, int y, int height, uint16_t color) {
-    graphics_draw_rect(x, y, 1, height, color);
-}
-
-// Desenhar círculo (algoritmo de Bresenham)
-void graphics_draw_circle(int center_x, int center_y, int radius, uint16_t color) {
-    int x = 0;
-    int y = radius;
-    int d = 3 - 2 * radius;
-    
-    while (x <= y) {
-        // Desenhar 8 pontos simétricos
-        graphics_draw_pixel(center_x + x, center_y + y, color);
-        graphics_draw_pixel(center_x - x, center_y + y, color);
-        graphics_draw_pixel(center_x + x, center_y - y, color);
-        graphics_draw_pixel(center_x - x, center_y - y, color);
-        graphics_draw_pixel(center_x + y, center_y + x, color);
-        graphics_draw_pixel(center_x - y, center_y + x, color);
-        graphics_draw_pixel(center_x + y, center_y - x, color);
-        graphics_draw_pixel(center_x - y, center_y - x, color);
-        
-        if (d < 0) {
-            d = d + 4 * x + 6;
-        } else {
-            d = d + 4 * (x - y) + 10;
-            y--;
-        }
-        x++;
-    }
-}
-
-// Desenhar círculo preenchido
-void graphics_draw_filled_circle(int center_x, int center_y, int radius, uint16_t color) {
-    for (int y = -radius; y <= radius; y++) {
-        for (int x = -radius; x <= radius; x++) {
-            if (x * x + y * y <= radius * radius) {
-                graphics_draw_pixel(center_x + x, center_y + y, color);
-            }
+void graphics_draw_rect(int x, int y, int width, int height, uint16_t color) {
+    for (int dy = 0; dy < height; dy++) {
+        for (int dx = 0; dx < width; dx++) {
+            draw_pixel(x + dx, y + dy, color);
         }
     }
 }
 
-// Converter RGB888 para RGB565
-uint16_t graphics_rgb_to_565(uint8_t r, uint8_t g, uint8_t b) {
-    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-}
-
-// Extrair componentes RGB de cor 565
-void graphics_565_to_rgb(uint16_t color, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *r = (color >> 11) << 3;
-    *g = ((color >> 5) & 0x3F) << 2;
-    *b = (color & 0x1F) << 3;
-}
-
-// Desenhar grade do jogo
-void graphics_draw_grid(uint16_t color) {
-    // Linhas verticais
-    for (int x = 0; x <= GAME_WIDTH; x++) {
-        int px = x * CELL_SIZE;
-        graphics_draw_vline(px, 0, SCREEN_HEIGHT, color);
+void graphics_draw_rect_outline(int x, int y, int width, int height, uint16_t color) {
+    // Top and bottom lines
+    for (int dx = 0; dx < width; dx++) {
+        draw_pixel(x + dx, y, color);
+        draw_pixel(x + dx, y + height - 1, color);
     }
     
-    // Linhas horizontais
-    for (int y = 0; y <= GAME_HEIGHT; y++) {
-        int py = y * CELL_SIZE;
-        graphics_draw_hline(0, py, SCREEN_WIDTH, color);
+    // Left and right lines
+    for (int dy = 1; dy < height - 1; dy++) {
+        draw_pixel(x, y + dy, color);
+        draw_pixel(x + width - 1, y + dy, color);
     }
 }
 
-// Desenhar célula do jogo (com coordenadas lógicas)
-void graphics_draw_game_cell(int game_x, int game_y, uint16_t color) {
-    int pixel_x = game_x * CELL_SIZE;
-    int pixel_y = game_y * CELL_SIZE;
-    
-    graphics_draw_rect(pixel_x + 1, pixel_y + 1, 
-                      CELL_SIZE - 2, CELL_SIZE - 2, color);
-}
-
-// Desenhar célula com borda
-void graphics_draw_game_cell_bordered(int game_x, int game_y, 
-                                    uint16_t fill_color, uint16_t border_color) {
-    int pixel_x = game_x * CELL_SIZE;
-    int pixel_y = game_y * CELL_SIZE;
-    
-    // Borda
-    graphics_draw_rect_outline(pixel_x, pixel_y, CELL_SIZE, CELL_SIZE, border_color);
-    
-    // Preenchimento
-    graphics_draw_rect(pixel_x + 1, pixel_y + 1, 
-                      CELL_SIZE - 2, CELL_SIZE - 2, fill_color);
-}
-
-// Função simples para desenhar texto (bitmap font 8x8)
-// Esta é uma implementação muito básica - em projeto real usaria fonte verdadeira
 void graphics_draw_char(int x, int y, char c, uint16_t color) {
-    // Fonte bitmap 8x8 muito simples para alguns caracteres
-    static const uint8_t font8x8[][8] = {
-        // '0'
-        {0x3C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C},
-        // '1' 
-        {0x18, 0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E},
-        // ... outros caracteres seriam adicionados aqui
-    };
+    if (c < 32 || c > 126) return; // Apenas caracteres ASCII imprimíveis
     
-    if (c >= '0' && c <= '1') { // Suporte limitado apenas 0-1 neste exemplo
-        const uint8_t *glyph = font8x8[c - '0'];
-        
-        for (int row = 0; row < 8; row++) {
-            for (int col = 0; col < 8; col++) {
-                if (glyph[row] & (1 << (7 - col))) {
-                    graphics_draw_pixel(x + col, y + row, color);
-                }
+    const uint8_t *glyph = font_8x8[c - 32];
+    
+    for (int row = 0; row < 8; row++) {
+        uint8_t line = glyph[row];
+        for (int col = 0; col < 8; col++) {
+            if (line & (0x80 >> col)) {
+                draw_pixel(x + col, y + row, color);
             }
         }
     }
 }
 
-// Desenhar string simples
 void graphics_draw_string(int x, int y, const char *str, uint16_t color) {
-    int offset = 0;
+    int pos_x = x;
     while (*str) {
-        graphics_draw_char(x + offset * 8, y, *str, color);
+        graphics_draw_char(pos_x, y, *str, color);
+        pos_x += 8;
         str++;
-        offset++;
     }
+}
+
+void graphics_draw_game_cell(int grid_x, int grid_y, uint16_t color) {
+    int pixel_x = grid_x * CELL_SIZE;
+    int pixel_y = grid_y * CELL_SIZE;
+    graphics_draw_rect(pixel_x, pixel_y, CELL_SIZE, CELL_SIZE, color);
+}
+
+void graphics_draw_game_cell_bordered(int grid_x, int grid_y, uint16_t fill_color, uint16_t border_color) {
+    int pixel_x = grid_x * CELL_SIZE;
+    int pixel_y = grid_y * CELL_SIZE;
+    
+    // Desenha o preenchimento
+    graphics_draw_rect(pixel_x + 1, pixel_y + 1, CELL_SIZE - 2, CELL_SIZE - 2, fill_color);
+    
+    // Desenha a borda
+    graphics_draw_rect_outline(pixel_x, pixel_y, CELL_SIZE, CELL_SIZE, border_color);
+}
+
+void graphics_swap_buffers(void) {
+    // Para implementação simples, não fazemos nada
+    // Em um sistema com double buffering, aqui trocaria os buffers
 }

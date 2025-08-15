@@ -1,85 +1,68 @@
-#
-# Makefile para Snake Game com USPI
-# Raspberry Pi bare metal
-#
+# Configurações do compilador
+CC = arm-none-eabi-gcc
+AR = arm-none-eabi-ar
+OBJCOPY = arm-none-eabi-objcopy
 
-# Configurações
-RASPPI = 3
-PREFIX = arm-none-eabi-
+# Flags de compilação
+CFLAGS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding
+CFLAGS += -I./uspi/include -Isrc -Iinclude
+CFLAGS += -mcpu=cortex-a53 -DRASPPI=3
 
 # Diretórios
-USPI_DIR = ./uspi
 SRCDIR = src
 BUILDDIR = build
+USPIDIR = uspi
+INCLUDEDIR = include
 
-# Compilador e flags
-CC = $(PREFIX)gcc
-AS = $(PREFIX)as
-LD = $(PREFIX)ld
-OBJCOPY = $(PREFIX)objcopy
+# Arquivos fonte
+SOURCES = $(SRCDIR)/main.c $(SRCDIR)/graphics.c
+ASM_SOURCES = $(SRCDIR)/startup.s
+OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(BUILDDIR)/%.o) $(ASM_SOURCES:$(SRCDIR)/%.s=$(BUILDDIR)/%.o)
 
-# Flags do compilador
-CFLAGS = -Wall -O2 -nostdlib -nostartfiles -ffreestanding
-CFLAGS += -I$(USPI_DIR)/include
-CFLAGS += -I$(SRCDIR)
-
-# Flags específicas para Raspberry Pi
-ifeq ($(RASPPI), 1)
-	CFLAGS += -mcpu=arm1176jzf-s -DRASPPI=1
-	LDFLAGS = -T rpi1.ld
-else ifeq ($(RASPPI), 2)
-	CFLAGS += -mcpu=cortex-a7 -DRASPPI=2
-	LDFLAGS = -T rpi2.ld
-else ifeq ($(RASPPI), 3)
-	CFLAGS += -mcpu=cortex-a53 -DRASPPI=3
-	LDFLAGS = -T rpi3.ld
-endif
-
-# Arquivos
-SOURCES = main.c graphics.c startup.s
-OBJECTS = $(SOURCES:%.c=$(BUILDDIR)/%.o)
-OBJECTS := $(OBJECTS:%.s=$(BUILDDIR)/%.o)
-
-# Bibliotecas USPI
-USPI_LIB = $(USPI_DIR)/lib/libuspi.a
+# Biblioteca USPI
+USPI_LIB = $(USPIDIR)/lib/libuspi.a
 
 # Targets
-all: kernel.img
+TARGET = kernel.elf
+IMAGE = kernel.img
 
-kernel.img: kernel.elf
-	$(OBJCOPY) $< -O binary $@
+.PHONY: all clean uspi
 
-kernel.elf: $(OBJECTS) $(USPI_LIB)
-	$(LD) $(LDFLAGS) -o $@ $^
+all: $(IMAGE)
 
+# Construir a imagem final
+$(IMAGE): $(TARGET)
+	$(OBJCOPY) $(TARGET) -O binary $(IMAGE)
+
+# Linkar o executável
+$(TARGET): $(OBJECTS) $(USPI_LIB)
+	$(CC) $(CFLAGS) -T $(SRCDIR)/kernel.ld -o $@ $(OBJECTS) -L$(USPIDIR)/lib -luspi
+
+# Compilar objetos C
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Compilar objetos Assembly
 $(BUILDDIR)/%.o: $(SRCDIR)/%.s | $(BUILDDIR)
-	$(AS) $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
+# Criar diretório de build
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
-$(USPI_LIB):
-	$(MAKE) -C $(USPI_DIR)/lib
+# Construir biblioteca USPI
+$(USPI_LIB): uspi
 
+uspi:
+	$(MAKE) -C $(USPIDIR)/lib
+
+# Limpeza
 clean:
 	rm -rf $(BUILDDIR)
-	rm -f kernel.elf kernel.img
-	$(MAKE) -C $(USPI_DIR)/lib clean
+	rm -f $(TARGET) $(IMAGE)
+	$(MAKE) -C $(USPIDIR)/lib clean
 
-# Target para executar no QEMU (para testes)
-qemu: kernel.img
-	qemu-system-arm -M raspi3 -kernel kernel.img -serial stdio -display none
-
-# Target para instalar no cartão SD
-install: kernel.img
-	@echo "Copy kernel.img to your SD card along with:"
-	@echo "- bootcode.bin"
-	@echo "- fixup.dat (or fixup_cd.dat for Pi 4)"
-	@echo "- start.elf (or start_cd.elf for Pi 4)"
-	@echo "These files can be found at:"
-	@echo "https://github.com/raspberrypi/firmware/tree/master/boot"
-
-.PHONY: all clean qemu install
+# Dependências
+$(BUILDDIR)/main.o: $(SRCDIR)/main.c $(INCLUDEDIR)/config.h $(INCLUDEDIR)/graphics.h
+$(BUILDDIR)/graphics.o: $(SRCDIR)/graphics.c $(INCLUDEDIR)/config.h $(INCLUDEDIR)/graphics.h
+$(BUILDDIR)/startup.o: $(SRCDIR)/startup.s
